@@ -68,6 +68,12 @@
 
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof((x)[0]))
 
+#if EV_WINDOWS
+#define SKIP_UNDER_WINDOWS TT_SKIP
+#else
+#define SKIP_UNDER_WINDOWS 0
+#endif
+
 /* set if a test needs to call loopexit on a base */
 static struct event_base *exit_base;
 
@@ -2083,7 +2089,6 @@ http_virtual_host_test(void *arg)
 		evhttp_free(http);
 }
 
-
 /* test date header and content length */
 
 static void
@@ -2219,6 +2224,108 @@ http_dispatcher_test(void *arg)
 	if (http)
 		evhttp_free(http);
 }
+
+#ifndef _WIN32
+/* test unix socket */
+#include <sys/un.h>
+
+/* Should this be part of the libevent library itself? */
+static int evhttp_bind_unixsocket(struct evhttp *httpd, const char *path)
+{
+	struct sockaddr_un local;
+	struct stat st;
+	int fd;
+
+	local.sun_family = AF_UNIX;
+	strcpy(local.sun_path, path);
+
+	/* if the file exists and it is a socket, remove it. Someone
+	   could create a symlink and get us to remove random files */
+	if (stat(path, &st) == 0 && S_ISSOCK(st.st_mode))
+		unlink(path);
+
+	fd = evutil_socket_(AF_UNIX,
+	    EVUTIL_SOCK_CLOEXEC | EVUTIL_SOCK_NONBLOCK | SOCK_STREAM, 0);
+	if (fd == -1)
+		return -1;
+
+	if (bind(fd, (struct sockaddr*)&local, sizeof(local))) {
+		close(fd);
+		return -1;
+	}
+
+	/* fchmod(fd, 0777) does nothing */
+	if (chmod(path, 0777)) {
+		close(fd);
+		return -1;
+	}
+
+	if (listen(fd, 128)) {
+		close(fd);
+		return -1;
+	}
+
+	if (evhttp_accept_socket(httpd, fd)) {
+		close(fd);
+		return -1;
+	}
+
+	return 0;
+}
+
+static void http_unix_socket_test(void *arg)
+{
+	struct basic_test_data *data = arg;
+	struct evhttp_uri *uri = NULL;
+	struct evhttp_connection *evcon = NULL;
+	struct evhttp_request *req;
+	struct evhttp *myhttp;
+	char tmp_sock_path[512];
+	char uri_loc[1024];
+
+	// Avoid overlap with parallel runs
+	evutil_snprintf(tmp_sock_path, sizeof(tmp_sock_path), "/tmp/eventtmp.%i.sock", getpid());
+	evutil_snprintf(uri_loc, sizeof(uri_loc), "http://unix:%s:/?arg=val", tmp_sock_path);
+
+	myhttp = evhttp_new(data->base);
+	tt_assert(!evhttp_bind_unixsocket(myhttp, tmp_sock_path));
+
+	evhttp_set_cb(myhttp, "/", http_dispatcher_cb, data->base);
+
+	uri = evhttp_uri_parse_with_flags(uri_loc, EVHTTP_URI_UNIX_SOCKET);
+	tt_assert(uri);
+
+	evcon = evhttp_connection_base_bufferevent_unix_new(data->base, NULL, evhttp_uri_get_unixsocket(uri));
+
+	/*
+	 * At this point, we want to schedule an HTTP GET request
+	 * server using our make request method.
+	 */
+	req = evhttp_request_new(http_dispatcher_test_done, data->base);
+	tt_assert(req);
+
+	/* Add the information that we care about */
+	evhttp_add_header(evhttp_request_get_output_headers(req), "Host", "somehost");
+
+	if (evhttp_make_request(evcon, req, EVHTTP_REQ_GET, "/?arg=val") == -1) {
+		tt_abort_msg("Couldn't make request");
+	}
+
+	event_base_dispatch(data->base);
+
+ end:
+	if (evcon)
+		evhttp_connection_free(evcon);
+	if (myhttp)
+		evhttp_free(myhttp);
+	if (uri)
+		evhttp_uri_free(uri);
+
+	/* Does mkstemp() succeed? */
+	if (!strstr(tmp_sock_path, "XXXXXX"))
+		unlink(tmp_sock_path);
+}
+#endif
 
 /*
  * HTTP POST test.
@@ -2842,13 +2949,14 @@ end:
 }
 
 static void
-http_parse_uri_test(void *ptr)
+http_parse_uri_test(void *arg)
 {
-	const int nonconform = (ptr != NULL);
-	const unsigned parse_flags =
-	    nonconform ? EVHTTP_URI_NONCONFORMANT : 0;
+	int nonconform = 0, unixsock = 0;
+	int parse_flags = 0;
 	struct evhttp_uri *uri = NULL;
 	char url_tmp[4096];
+	struct basic_test_data *data = arg;
+	const char *setup_data = data ? data->setup_data : NULL;
 #define URI_PARSE_FLAGS(uri, flags) \
 	evhttp_uri_parse_with_flags((uri), flags)
 #define URI_PARSE(uri) \
@@ -2861,6 +2969,17 @@ http_parse_uri_test(void *ptr)
 	if (strcmp(ret,want) != 0)					\
 		TT_FAIL(("\"%s\" != \"%s\"",ret,want));			\
 	} while(0)
+
+	if (setup_data) {
+		if (strstr(setup_data, "nc") != NULL) {
+			nonconform = 1;
+			parse_flags |= EVHTTP_URI_NONCONFORMANT;
+		}
+		if (strstr(setup_data, "un") != NULL) {
+			unixsock = 1;
+			parse_flags |= EVHTTP_URI_UNIX_SOCKET;
+		}
+	}
 
 	tt_want(evhttp_uri_join(NULL, 0, 0) == NULL);
 	tt_want(evhttp_uri_join(NULL, url_tmp, 0) == NULL);
@@ -2878,6 +2997,18 @@ http_parse_uri_test(void *ptr)
 			TT_FAIL(("Expected error parsing \"%s\"",s));	\
 		} else if (uri == NULL && nonconform) {			\
 			TT_FAIL(("Couldn't parse nonconformant URI \"%s\"", \
+				s));					\
+		}							\
+		if (uri) {						\
+			tt_want(evhttp_uri_join(uri, url_tmp,		\
+				sizeof(url_tmp)));			\
+			evhttp_uri_free(uri);				\
+		}							\
+	} while(0)
+#define UNI(s) do {							\
+		uri = URI_PARSE(s);					\
+		if (uri == NULL && unixsock) {			\
+			TT_FAIL(("Couldn't parse unix socket URI \"%s\"", \
 				s));					\
 		}							\
 		if (uri) {						\
@@ -2921,6 +3052,12 @@ http_parse_uri_test(void *ptr)
 	BAD("http://www.example.com:9999999999999999999999999999999999999/");
 	BAD("http://www.example.com:hihi/");
 	BAD("://www.example.com/");
+
+#ifndef _WIN32
+	UNI("http://unix:/tmp/foobar/:/foo");
+	UNI("http://user:pass@unix:/tmp/foobar/:/foo");
+	UNI("http://unix:a:");
+#endif
 
 	/* bad URIs: joining */
 	uri = evhttp_uri_new();
@@ -5574,6 +5711,7 @@ end:
 #define HTTP_N(title, name, test_opts, arg) \
 	{ #title, http_##name##_test, TT_ISOLATED|test_opts, &basic_setup, HTTP_CAST_ARG(arg) }
 #define HTTP(name) HTTP_N(name, name, 0, NULL)
+#define HTTP_OPT(name, opt) HTTP_N(name, name, opt, NULL)
 #define HTTPS(name) \
 	{ "https_openssl_" #name, https_##name##_test, TT_ISOLATED, &basic_setup, NULL }
 #define HTTPS_MBEDTLS(name) \
@@ -5654,6 +5792,8 @@ struct testcase_t http_testcases[] = {
 	{ "parse_query_str_flags", http_parse_query_str_flags_test, 0, NULL, NULL },
 	{ "parse_uri", http_parse_uri_test, 0, NULL, NULL },
 	{ "parse_uri_nc", http_parse_uri_test, 0, &basic_setup, (void*)"nc" },
+	{ "parse_uri_un", http_parse_uri_test, 0, &basic_setup, (void*)"un" },
+	{ "parse_uri_un_nc", http_parse_uri_test, 0, &basic_setup, (void*)"un_nc" },
 	{ "uriencode", http_uriencode_test, 0, NULL, NULL },
 	HTTP(basic),
 	HTTP(basic_trailing_space),
@@ -5674,6 +5814,9 @@ struct testcase_t http_testcases[] = {
 	HTTP_RET_N(cancel_by_host_ns_timeout_inactive_server, cancel, TT_NO_LOGS, BY_HOST | NO_NS | NS_TIMEOUT | INACTIVE_SERVER),
 
 	HTTP(virtual_host),
+#ifndef _WIN32
+	HTTP(unix_socket),
+#endif
 	HTTP(post),
 	HTTP(put),
 	HTTP(delete),
@@ -5716,7 +5859,7 @@ struct testcase_t http_testcases[] = {
 	{ "connection_retry_conn_address", http_connection_retry_conn_address_test,
 	  TT_ISOLATED|TT_OFF_BY_DEFAULT, &basic_setup, NULL },
 
-	HTTP(data_length_constraints),
+	HTTP_OPT(data_length_constraints, SKIP_UNDER_WINDOWS|TT_RETRIABLE),
 	HTTP(read_on_write_error),
 	HTTP(non_lingering_close),
 	HTTP(lingering_close),
@@ -5735,7 +5878,7 @@ struct testcase_t http_testcases[] = {
 	HTTP(request_extra_body),
 
 	HTTP(newreqcb),
-	HTTP(max_connections),
+	HTTP_OPT(max_connections, SKIP_UNDER_WINDOWS),
 
 	HTTP(timeout_read_client),
 	HTTP(timeout_read_server),
