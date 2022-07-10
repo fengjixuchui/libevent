@@ -1190,6 +1190,7 @@ dns_nameservers_no_default_test(void *arg)
 	dns = evdns_base_new(base, 0);
 	tt_assert(dns);
 	tt_int_op(evdns_base_get_nameserver_addr(dns, 0, NULL, 0), ==, -1);
+	tt_int_op(evdns_base_get_nameserver_fd(dns, 0), ==, -1);
 
 	/* We cannot test
 	 * EVDNS_BASE_INITIALIZE_NAMESERVERS|EVDNS_BASE_NAMESERVERS_NO_DEFAULT
@@ -1198,9 +1199,11 @@ dns_nameservers_no_default_test(void *arg)
 	evdns_base_resolv_conf_parse(dns,
 		DNS_OPTIONS_ALL|DNS_OPTION_NAMESERVERS_NO_DEFAULT, RESOLV_FILE);
 	tt_int_op(evdns_base_get_nameserver_addr(dns, 0, NULL, 0), ==, -1);
+	tt_int_op(evdns_base_get_nameserver_fd(dns, 0), ==, -1);
 
 	evdns_base_resolv_conf_parse(dns, DNS_OPTIONS_ALL, RESOLV_FILE);
 	tt_int_op(evdns_base_get_nameserver_addr(dns, 0, NULL, 0), ==, sizeof(struct sockaddr));
+	tt_int_op(evdns_base_get_nameserver_fd(dns, 0), !=, -1);
 
 end:
 	if (dns)
@@ -2033,10 +2036,10 @@ end:
 }
 
 static void
-gaic_launch(struct event_base *base, struct evdns_base *dns_base)
+gaic_launch(struct event_base *base, struct evdns_base *dns_base, unsigned i)
 {
 	struct gaic_request_status *status = calloc(1,sizeof(*status));
-	struct timeval tv = { 0, 10000 };
+	struct timeval tv = { 0, i % 2 ? 100000 : 1 };
 	status->magic = GAIC_MAGIC;
 	status->base = base;
 	status->dns_base = dns_base;
@@ -2264,13 +2267,14 @@ test_getaddrinfo_async_cancel_stress(void *ptr)
 	    (struct sockaddr*)&ss, slen, 0);
 
 	for (i = 0; i < 1000; ++i) {
-		gaic_launch(base, dns_base);
+		gaic_launch(base, dns_base, i);
 	}
 
 	event_base_dispatch(base);
 
 	// at least some was canceled via external event
 	tt_int_op(gaic_freed, !=, 1000);
+	tt_int_op(gaic_freed, !=, 0);
 
 end:
 	if (dns_base)

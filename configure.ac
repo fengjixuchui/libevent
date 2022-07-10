@@ -280,13 +280,7 @@ AS_IF([test "$bwin32" = "true"],
 
 AM_CONDITIONAL(STRLCPY_IMPL, [test "$ac_cv_func_strlcpy" = "no"])
 
-m4_define([funcstochk],
-  [getnameinfo
-  getprotobynumber
-  getservbyname
-  inet_ntop
-  inet_pton]
-)
+m4_define([funcstochk], [getnameinfo getprotobynumber getservbyname inet_ntop inet_pton])
 
 AS_IF([test "$bwin32" = "true"],
   [AX_CHECK_DECLS_EX([funcstochk getaddrinfo],
@@ -762,23 +756,23 @@ if test "$enable_gcc_warnings" != "no" && test "$GCC" = "yes"; then
   AX_CHECK_COMPILE_FLAG([-Wwrite-strings],[CFLAGS="$CFLAGS -Wwrite-strings"],[],[-Werror])
 
   dnl Convert warnings into errors
-  if test x"$enable_gcc_warnings" = "yes"; then
+  if test "$enable_gcc_warnings" = "yes"; then
     AX_CHECK_COMPILE_FLAG([-Werror], [CFLAGS="$CFLAGS -Werror"])
   fi
 
-  dnl Disable warnings for unused paramaters
-  AX_CHECK_COMPILE_FLAG([-Wno-unused-parameter], [CFLAGS="$CFLAGS -Wno-unused-parameter"],[],[-Werror])
-  AX_CHECK_COMPILE_FLAG([-Wno-void-pointer-to-enum-cast], [CFLAGS="$CFLAGS -Wno-void-pointer-to-enum-cast"],[],[-Werror])
+  dnl Disable warnings for unused parameters
+  AX_CHECK_COMPILE_FLAG([-Wunused-parameter], [CFLAGS="$CFLAGS -Wno-unused-parameter"],[],[-Werror])
+  AX_CHECK_COMPILE_FLAG([-Wvoid-pointer-to-enum-cast], [CFLAGS="$CFLAGS -Wno-void-pointer-to-enum-cast"],[],[-Werror])
 
   AC_COMPILE_IFELSE([AC_LANG_PROGRAM([], [
   #if !defined(__clang__)
   #error
   #endif])], have_clang=yes, have_clang=no)
 
-  if test "$have_clang" = "yes"; then
-    dnl Disable unused-function warnings. These trigger for minheap-internal.h.
-    AX_CHECK_COMPILE_FLAG([-Wno-unused-function], [CFLAGS="$CFLAGS -Wno-unused-function"],[],[-Werror])
+   dnl Disable unused-function warnings. These trigger for minheap-internal.h.
+   AX_CHECK_COMPILE_FLAG([-Wno-unused-function], [CFLAGS="$CFLAGS -Wno-unused-function"],[],[-Werror])
 
+  if test "$have_clang" = "yes"; then
     case "$host_os" in
       darwin*)
         dnl Clang on macOS emits warnings for each directory specified which

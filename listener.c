@@ -275,8 +275,13 @@ evconnlistener_new_bind(struct event_base *base, evconnlistener_cb cb,
 
 	return listener;
 err:
-	evutil_closesocket(fd);
-	return NULL;
+	{
+		int saved_errno = EVUTIL_SOCKET_ERROR();
+		evutil_closesocket(fd);
+		if (saved_errno)
+			EVUTIL_SET_SOCKET_ERROR(saved_errno);
+		return NULL;
+	}
 }
 
 void
@@ -433,10 +438,8 @@ listener_read_cb(evutil_socket_t fd, short what, void *p)
 		++lev->refcnt;
 		cb = lev->cb;
 		user_data = lev->user_data;
-		UNLOCK(lev);
 		cb(lev, new_fd, (struct sockaddr*)&ss, (int)socklen,
 		    user_data);
-		LOCK(lev);
 		if (lev->refcnt == 1) {
 			int freed = listener_decref_and_unlock(lev);
 			EVUTIL_ASSERT(freed);
@@ -458,9 +461,7 @@ listener_read_cb(evutil_socket_t fd, short what, void *p)
 		++lev->refcnt;
 		errorcb = lev->errorcb;
 		user_data = lev->user_data;
-		UNLOCK(lev);
 		errorcb(lev, user_data);
-		LOCK(lev);
 		listener_decref_and_unlock(lev);
 	} else {
 		event_sock_warn(fd, "Error from accept() call");

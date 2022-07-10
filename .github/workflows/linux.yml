@@ -21,7 +21,7 @@ on:
 jobs:
   cmake:
     runs-on: ${{ matrix.os }}
-    if: "!contains(github.event.head_commit.message, 'ci skip')"
+    if: "!contains(github.event.head_commit.message, 'ci/linux skip') && !contains(github.event.head_commit.message, 'ci/linux/cmake skip')"
     strategy:
       fail-fast: false
       matrix:
@@ -40,6 +40,9 @@ jobs:
           - ASAN
           - TSAN
           - UBSAN
+        include:
+          - os: ubuntu-22.04
+            EVENT_MATRIX: OPENSSL_3
 
     steps:
       - uses: actions/checkout@v2.0.0
@@ -103,8 +106,8 @@ jobs:
 
           mkdir -p build
           cd build
-          echo [cmake]: cmake .. $EVENT_CMAKE_OPTIONS
-          cmake .. $EVENT_CMAKE_OPTIONS || (rm -rf * && cmake .. $EVENT_CMAKE_OPTIONS)
+          echo [cmake]: cmake .. -DEVENT__ENABLE_GCC_WARNINGS=ON $EVENT_CMAKE_OPTIONS
+          cmake .. -DEVENT__ENABLE_GCC_WARNINGS=ON $EVENT_CMAKE_OPTIONS || (rm -rf * && cmake .. $EVENT_CMAKE_OPTIONS)
           cmake --build .
 
       - name: Test
@@ -145,7 +148,7 @@ jobs:
 
   autotools:
     runs-on: ${{ matrix.os }}
-    if: "!contains(github.event.head_commit.message, 'ci skip')"
+    if: "!contains(github.event.head_commit.message, 'ci/linux skip') && !contains(github.event.head_commit.message, 'ci/linux/autotools skip')"
     strategy:
       fail-fast: false
       matrix:
@@ -159,6 +162,9 @@ jobs:
           - DISABLE_DEBUG_MODE
           - DISABLE_MM_REPLACEMENT
           - COMPILER_CLANG
+        include:
+          - os: ubuntu-22.04
+            EVENT_MATRIX: OPENSSL_3
 
     steps:
       - uses: actions/checkout@v2.0.0
@@ -219,8 +225,8 @@ jobs:
 
           mkdir -p build
           cd build
-          echo [configure]: ../configure $EVENT_CONFIGURE_OPTIONS
-          ../configure $EVENT_CONFIGURE_OPTIONS
+          echo [configure]: ../configure --enable-gcc-warnings $EVENT_CONFIGURE_OPTIONS
+          ../configure --enable-gcc-warnings $EVENT_CONFIGURE_OPTIONS
           make
       - name: Test
         shell: bash
