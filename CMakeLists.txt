@@ -37,6 +37,8 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_LOWER)
 
+set(CMAKE_DEBUG_POSTFIX d CACHE STRING "Debug library postfix" FORCE)
+
 set(EVENT__LIBRARY_TYPE DEFAULT CACHE STRING
     "Set library type to SHARED/STATIC/BOTH (default SHARED for MSVC, otherwise BOTH)")
 
@@ -176,8 +178,8 @@ macro(Configure_RPATH)
     # - "///" -> "/"
     # - "/////usr///" -> "//usr"
     # So it should be normalized again.
-    file(REAL_PATH "${CMAKE_INSTALL_PREFIX}" CMAKE_INSTALL_PREFIX_NORMALIZED)
 
+    get_filename_component(CMAKE_INSTALL_PREFIX_NORMALIZED "${CMAKE_INSTALL_PREFIX}" REALPATH)
     list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX_NORMALIZED}/lib" isSystemDir)
 
     if("${isSystemDir}" STREQUAL "-1")
@@ -516,6 +518,7 @@ else()
         select
         epoll_create
         epoll_create1
+        epoll_pwait2
         epoll_ctl
         eventfd
         poll
@@ -543,6 +546,7 @@ else()
         unsetenv
         setrlimit
         gethostbyname_r
+        mmap64
     )
     if (APPLE)
         list(APPEND SYMBOLS_TO_CHECK mach_absolute_time)
@@ -552,6 +556,11 @@ endif()
 if (NOT EVENT__DISABLE_THREAD_SUPPORT)
     if (WIN32)
         list(APPEND SRC_CORE evthread_win32.c)
+    elseif(ANDROID)
+        # pthreads is built in to bionic
+        set(EVENT__HAVE_PTHREADS 1)
+        CHECK_TYPE_SIZE(pthread_t EVENT__SIZEOF_PTHREAD_T)
+        list(APPEND SYMBOLS_TO_CHECK pthread_mutexattr_setprotocol)
     else()
         find_package(Threads REQUIRED)
         if (NOT CMAKE_USE_PTHREADS_INIT)
@@ -815,7 +824,9 @@ set(HDR_PRIVATE
     ratelim-internal.h
     strlcpy-internal.h
     util-internal.h
+    openssl-compat.h
     evconfig-private.h
+    sha1.h
     compat/sys/queue.h)
 
 set(HDR_COMPAT
@@ -850,6 +861,7 @@ set(HDR_PUBLIC
     include/event2/tag_compat.h
     include/event2/thread.h
     include/event2/util.h
+    include/event2/ws.h
     include/event2/visibility.h
     ${PROJECT_BINARY_DIR}/include/event2/event-config.h)
 
@@ -962,8 +974,21 @@ set(SRC_EXTRA
     event_tagging.c
     http.c
     evdns.c
+    ws.c
+    sha1.c
     evrpc.c)
 
+if("${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION}" LESS 3.20)
+  include(TestBigEndian)
+  TEST_BIG_ENDIAN(IS_BIG_ENDIAN)
+  if(IS_BIG_ENDIAN)
+    set(CMAKE_C_BYTE_ORDER BIG_ENDIAN)
+  else()
+    set(CMAKE_C_BYTE_ORDER LITTLE_ENDIAN)
+  endif()
+endif()
+set_source_files_properties(sha1.c PROPERTIES COMPILE_FLAGS
+    -D${CMAKE_C_BYTE_ORDER}=1)
 add_definitions(-DHAVE_CONFIG_H)
 
 # We use BEFORE here so we don't accidentally look in system directories
@@ -1130,6 +1155,7 @@ if (NOT EVENT__DISABLE_SAMPLES)
 
     set(SAMPLES_WOPT
         dns-example
+        ws-chat-server
         http-server
     )
     foreach (SAMPLE ${SAMPLES_WOPT})
@@ -1213,6 +1239,7 @@ if (NOT EVENT__DISABLE_TESTS)
                  test/regress_et.c
                  test/regress_finalize.c
                  test/regress_http.c
+                 test/regress_http.h
                  test/regress_listener.c
                  test/regress_main.c
                  test/regress_minheap.c
@@ -1221,6 +1248,8 @@ if (NOT EVENT__DISABLE_TESTS)
                  test/regress_testutils.h
                  test/regress_util.c
                  test/regress_watch.c
+                 test/regress_ws.c
+                 test/regress_ws.h
                  test/tinytest.c)
 
             if (WIN32)
