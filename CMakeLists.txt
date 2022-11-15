@@ -293,8 +293,6 @@ if (${GNUC})
     option(EVENT__ENABLE_GCC_FUNCTION_SECTIONS "Enable gcc function sections" OFF)
     option(EVENT__ENABLE_GCC_WARNINGS "Make all GCC warnings into errors" OFF)
 
-    set(GCC_V ${CMAKE_C_COMPILER_VERSION})
-
     list(APPEND __FLAGS
          -Wall -Wextra -Wno-unused-parameter -Wstrict-aliasing -Wstrict-prototypes
          -Wundef
@@ -317,14 +315,16 @@ if (${GNUC})
 
          -Wwrite-strings
 
-        # Disable unused-function warnings. These trigger for minheap-internal.h.
-        -Wno-unused-function
+         # Disable unused-function warnings. These trigger for minheap-internal.h.
+         -Wno-unused-function
+
+         -Wno-pragmas
     )
 
     if (${CLANG})
         list(APPEND __FLAGS
-            # we use this hack in tests
-            -Wno-void-pointer-to-enum-cast)
+             # we use this hack in tests
+             -Wno-void-pointer-to-enum-cast)
     endif()
 
     if (EVENT__DISABLE_GCC_WARNINGS)
@@ -450,6 +450,7 @@ else()
         sys/wait.h
         sys/resource.h
         sys/timerfd.h
+        sys/signalfd.h
         netinet/in.h
         netinet/in6.h
         netinet/tcp.h
@@ -583,6 +584,7 @@ list(APPEND CMAKE_EXTRA_INCLUDE_FILES ${EVENT_INCLUDES} stdio.h)
 CHECK_SYMBOLS_EXIST("${SYMBOLS_TO_CHECK}" "${CMAKE_EXTRA_INCLUDE_FILES}" "EVENT")
 unset(SYMBOLS_TO_CHECK)
 set(EVENT__HAVE_EPOLL ${EVENT__HAVE_EPOLL_CREATE})
+set(EVENT__HAVE_SIGNALFD ${EVENT__HAVE_SYS_SIGNALFD_H})
 if(WIN32 AND NOT CYGWIN)
     set(EVENT__HAVE_WEPOLL 1)
 endif()
@@ -902,6 +904,10 @@ endif()
 
 if(EVENT__HAVE_EPOLL)
     list(APPEND SRC_CORE epoll.c)
+endif()
+
+if(EVENT__HAVE_SIGNALFD)
+    list(APPEND SRC_CORE signalfd.c)
 endif()
 
 if(EVENT__HAVE_WEPOLL)

@@ -17,6 +17,14 @@ A million repetitions of "a"
 
 #define SHA1HANDSOFF
 
+#if defined(__clang__)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+/* Ignore the case when SHA1Transform() called with 'char *', that code passed
+ * buffer of 64 bytes anyway (at least now) */
+#pragma GCC diagnostic ignored "-Wstringop-overread"
+#endif
+
 #include <stdio.h>
 #include <string.h>
 
@@ -59,6 +67,12 @@ A million repetitions of "a"
 #define R4(v, w, x, y, z, i)                                                   \
     z += (w ^ x ^ y) + blk(i) + 0xCA62C1D6 + rol(v, 5);                        \
     w = rol(w, 30);
+
+typedef struct {
+    uint32_t state[5];
+    uint32_t count[2];
+    unsigned char buffer[64];
+} SHA1_CTX;
 
 static void SHA1Transform(uint32_t state[5], const unsigned char buffer[64]);
 
