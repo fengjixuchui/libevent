@@ -42,7 +42,7 @@ AC_ARG_ENABLE([gcc-warnings],
 AC_ARG_ENABLE([gcc-hardening],
      AS_HELP_STRING([--enable-gcc-hardening, enable compiler security checks]),
 [if test "$enableval" = "yes"; then
-    CFLAGS="$CFLAGS -D_FORTIFY_SOURCE=2 -fstack-protector-all"
+    CFLAGS="$CFLAGS -D_FORTIFY_SOURCE=3 -fstack-protector-all"
     CFLAGS="$CFLAGS -fwrapv -fPIE -Wstack-protector"
     CFLAGS="$CFLAGS --param ssp-buffer-size=1"
 fi])
@@ -272,7 +272,7 @@ dnl Checks for typedefs, structures, and compiler characteristics.
 AC_C_INLINE
 
 dnl Checks for library functions.
-AC_CHECK_FUNCS([accept4 arc4random arc4random_buf arc4random_addrandom eventfd epoll_create1 epoll_pwait2 fcntl getegid geteuid getifaddrs gettimeofday issetugid mach_absolute_time mmap nanosleep pipe pipe2 putenv sendfile setenv setrlimit sigaction signal strsignal strlcpy strsep strtok_r strtoll sysctl timerfd_create umask unsetenv usleep getrandom mmap64])
+AC_CHECK_FUNCS([accept4 arc4random arc4random_buf arc4random_addrandom eventfd epoll_create1 epoll_pwait2 fcntl getegid geteuid getifaddrs gettimeofday issetugid mach_absolute_time mmap nanosleep pipe pipe2 pread putenv sendfile setenv setrlimit sigaction signal strsignal strlcpy strsep strtok_r strtoll sysctl timerfd_create umask unsetenv usleep getrandom mmap64])
 
 AS_IF([test "$bwin32" = "true"],
   AC_CHECK_FUNCS(_gmtime64_s, , [AC_CHECK_FUNCS(_gmtime64)])
@@ -775,6 +775,9 @@ if test "$enable_gcc_warnings" != "no" && test "$GCC" = "yes"; then
 
    dnl Disable unknown pragmas warnings.
    AX_CHECK_COMPILE_FLAG([-Wno-pragmas], [CFLAGS="$CFLAGS -Wno-pragmas"],[],[-Werror])
+
+   dnl Disable Variable Lenght Array
+   AX_CHECK_COMPILE_FLAG([-Wvla], [CFLAGS="$CFLAGS -Wvla"],[],[-Werror])
 
   if test "$have_clang" = "yes"; then
     case "$host_os" in

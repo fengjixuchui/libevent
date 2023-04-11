@@ -37,7 +37,9 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_LOWER)
 
-set(CMAKE_DEBUG_POSTFIX d)
+if(NOT DEFINED CMAKE_DEBUG_POSTFIX)
+  set(CMAKE_DEBUG_POSTFIX d)
+endif()
 
 set(EVENT__LIBRARY_TYPE DEFAULT CACHE STRING
     "Set library type to SHARED/STATIC/BOTH (default SHARED for MSVC, otherwise BOTH)")
@@ -319,6 +321,8 @@ if (${GNUC})
          -Wno-unused-function
 
          -Wno-pragmas
+
+         -Wvla
     )
 
     if (${CLANG})
@@ -339,7 +343,7 @@ if (${GNUC})
              -Wstack-protector
              "--param ssp-buffer-size=1")
 
-        add_definitions(-D_FORTIFY_SOURCE=2)
+        add_definitions(-D_FORTIFY_SOURCE=3)
     endif()
 
     if (EVENT__ENABLE_GCC_FUNCTION_SECTIONS)
@@ -397,7 +401,6 @@ if (NOT DEFINED _GNU_SOURCE)
 endif()
 
 if (_GNU_SOURCE)
-    add_definitions(-D_GNU_SOURCE=1)
     set(CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
 endif()
 
@@ -529,6 +532,7 @@ else()
         mmap
         pipe
         pipe2
+        pread
         sendfile
         sigaction
         strsignal
@@ -554,6 +558,7 @@ else()
     endif()
 endif()
 
+set(PTHREADS_AVAILABLE OFF)
 if (NOT EVENT__DISABLE_THREAD_SUPPORT)
     if (WIN32)
         list(APPEND SRC_CORE evthread_win32.c)
@@ -562,12 +567,14 @@ if (NOT EVENT__DISABLE_THREAD_SUPPORT)
         set(EVENT__HAVE_PTHREADS 1)
         CHECK_TYPE_SIZE(pthread_t EVENT__SIZEOF_PTHREAD_T)
         list(APPEND SYMBOLS_TO_CHECK pthread_mutexattr_setprotocol)
+        set(PTHREADS_AVAILABLE ON)
     else()
         find_package(Threads REQUIRED)
         if (NOT CMAKE_USE_PTHREADS_INIT)
             message(FATAL_ERROR
                     "Failed to find Pthreads, set EVENT__DISABLE_THREAD_SUPPORT to disable")
         endif()
+        set(PTHREADS_AVAILABLE ON)
 
         set(EVENT__HAVE_PTHREADS 1)
         list(APPEND LIB_APPS ${CMAKE_THREAD_LIBS_INIT})
@@ -724,8 +731,13 @@ CHECK_TYPE_SIZE("time_t" EVENT__SIZEOF_TIME_T)
 
 # Verify kqueue works with pipes.
 if (EVENT__HAVE_KQUEUE)
-    if ((CMAKE_CROSSCOMPILING OR APPLE) AND NOT EVENT__FORCE_KQUEUE_CHECK)
-        message(WARNING "Cannot check if kqueue works with pipes when crosscompiling, use EVENT__FORCE_KQUEUE_CHECK to be sure (this requires manually running a test program on the cross compilation target)")
+    if (CMAKE_CROSSCOMPILING AND NOT EVENT__FORCE_KQUEUE_CHECK)
+        message(WARNING "Cannot check if kqueue works with pipes when crosscompiling.
+            Use EVENT__FORCE_KQUEUE_CHECK to be sure (this requires running a test program on the cross compilation target)")
+        set(EVENT__HAVE_WORKING_KQUEUE 1)
+    elseif (APPLE AND NOT EVENT__FORCE_KQUEUE_CHECK)
+        message(WARNING "Cannot check if kqueue works with pipes on macOS.
+            Use EVENT__FORCE_KQUEUE_CHECK to be sure (this requires running a test program).")
         set(EVENT__HAVE_WORKING_KQUEUE 1)
     else()
         message(STATUS "Checking if kqueue works with pipes...")
@@ -950,6 +962,20 @@ if (NOT EVENT__DISABLE_OPENSSL)
 endif()
 
 if (NOT EVENT__DISABLE_MBEDTLS)
+    # only if MBEDTLS_ROOT_DIR is not set yet
+    if (BREW AND NOT MBEDTLS_ROOT_DIR AND NOT "$ENV{MBEDTLS_ROOT_DIR}")
+        execute_process(COMMAND ${BREW} --prefix mbedtls
+            OUTPUT_VARIABLE BREW_MBEDTLS_PREFIX
+            RESULT_VARIABLE BREW_MBEDTLS_RESULT
+            ERROR_QUIET
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if (BREW_MBEDTLS_RESULT EQUAL 0)
+            message(STATUS "Set MBEDTLS_ROOT_DIR=${BREW_MBEDTLS_PREFIX} (from brew)")
+            set(MBEDTLS_ROOT_DIR "${BREW_MBEDTLS_PREFIX}" CACHE PATH "")
+        endif()
+    endif()
+
     find_package(MbedTLS REQUIRED)
 
     set(EVENT__HAVE_MBEDTLS 1)
@@ -1292,7 +1318,7 @@ if (NOT EVENT__DISABLE_TESTS)
             if (NOT EVENT__DISABLE_MBEDTLS)
                 target_link_libraries(regress event_mbedtls)
             endif()
-            if (CMAKE_USE_PTHREADS_INIT)
+            if (PTHREADS_AVAILABLE)
                 target_link_libraries(regress event_pthreads)
             endif()
         else()
